@@ -1,0 +1,49 @@
+# Matrix Power — charcoal glass, accessible ANSI colors, typing-driven heat.
+background = 080a0b
+foreground = dce4e7
+minimum-contrast = 4.5
+cursor-color = 00ff66
+cursor-text = 021007
+cursor-style = block
+cursor-style-blink = false
+selection-background = 294c68
+selection-foreground = ffffff
+font-family = Menlo
+font-size = 18
+adjust-cell-height = 8%
+window-padding-x = 18
+window-padding-y = 14
+window-width = 100
+window-height = 36
+window-theme = dark
+macos-titlebar-style = transparent
+background-opacity = 1
+# Amber and sky blue replace the usual red/green status pair.
+palette = 0=#11171b
+palette = 1=#f1a340
+palette = 2=#68c7ef
+palette = 3=#efe08d
+palette = 4=#829be0
+palette = 5=#d97bb4
+palette = 6=#41b7a7
+palette = 7=#dce4e7
+palette = 8=#84949b
+palette = 9=#ffca88
+palette = 10=#a8e2ff
+palette = 11=#fff1b0
+palette = 12=#b7caff
+palette = 13=#f3b3dc
+palette = 14=#9de8da
+palette = 15=#ffffff
+custom-shader = @PROJECT_DIR@/shaders/matrix-power.glsl
+# Keep the inactive-window rain moving.
+custom-shader-animation = always
+# The wrapper loads integration explicitly, after the real user startup files.
+shell-integration = none
+shell-integration-features = no-cursor,sudo,title
+command = @PROJECT_DIR@/launch-shell
+keybind = super+shift+p=csi:99~
+keybind = super+shift+b=csi:98~
+keybind = super+shift+i=csi:100~
+keybind = super+shift+s=csi:101~
+keybind = super+shift+k=csi:102~

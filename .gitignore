@@ -1,0 +1,4 @@
+.DS_Store
+__pycache__/
+shell/.zsh_history
+shell/.zsh_sessions/

@@ -1,0 +1,54 @@
+#!/bin/zsh
+mode=$1
+tty_device=${2:-}
+if [[ -z $tty_device ]]; then
+  pid=$$
+  while (( pid > 1 )); do
+    name=$(ps -o tty= -p $pid 2>/dev/null | tr -d ' ')
+    if [[ -n $name && $name != '??' ]]; then
+      tty_device=/dev/$name
+      break
+    fi
+    pid=$(ps -o ppid= -p $pid 2>/dev/null | tr -d ' ')
+  done
+fi
+if [[ -z $tty_device || ! -w $tty_device ]]; then
+  print -u2 'matrix-effect: no terminal found'
+  exit 1
+fi
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/matrix-power
+state_prefix=$state_dir/${tty_device:t}
+mkdir -p "$state_dir"
+case $mode in
+  power|background|idle|shake|sparks)
+    state="$state_prefix.$mode-off"
+    if [[ -e $state ]]; then
+      rm -f -- "$state"
+      effect_status=on
+    else
+      : > "$state"
+      effect_status=off
+    fi
+    ;;
+  color) ;;
+  *) print -u2 'matrix-effect: expected power, background, idle, shake, sparks, or color'; exit 2 ;;
+esac
+if [[ -e "$state_prefix.power-off" ]]; then
+  color=00ff00
+else
+  background=1
+  idle=1
+  shake=1
+  sparks=1
+  [[ -e "$state_prefix.background-off" ]] && background=0
+  [[ -e "$state_prefix.idle-off" ]] && idle=0
+  [[ -e "$state_prefix.shake-off" ]] && shake=0
+  [[ -e "$state_prefix.sparks-off" ]] && sparks=0
+  blue=$(( background + idle * 2 + shake * 4 + sparks * 8 ))
+  blue=$(printf '%02x' $blue)
+  color=00ff$blue
+fi
+printf '\e]12;#%s\a' "$color" > "$tty_device"
+if [[ $mode != color ]]; then
+  print "Matrix ${mode} is ${effect_status}."
+fi

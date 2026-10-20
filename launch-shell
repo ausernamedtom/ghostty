@@ -1,0 +1,13 @@
+#!/bin/zsh
+project_dir=${0:A:h}
+# A private startup directory adds the hook without editing your shell files.
+# Ghostty may inject its own ZDOTDIR before starting this wrapper. Sourcing
+# that directory's .zshenv would restore HOME and skip our .zshrc entirely.
+if [[ ${ZDOTDIR:-} == */shell-integration/zsh ]]; then
+  export MATRIX_ORIGINAL_ZDOTDIR=${GHOSTTY_ZSH_ZDOTDIR:-$HOME}
+else
+  export MATRIX_ORIGINAL_ZDOTDIR=${ZDOTDIR:-$HOME}
+fi
+unset GHOSTTY_ZSH_ZDOTDIR
+export ZDOTDIR=$project_dir/shell
+exec /bin/zsh -il
