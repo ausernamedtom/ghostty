@@ -112,7 +112,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 screen = viewportCoord / res * 2.0 - 1.0;
     vec2 bowed = screen * (1.0 + GLASS_CURVATURE * screen.yx * screen.yx);
     // Rounded rectangle distance in the bowed space: negative inside the glass, positive outside.
-    float cornerRadius = res.y * GLASS_CORNER_RADIUS;
+    // The cursor blue channel carries the effect flags; zero means Matrix Power is off.
+    int effectFlags = int(floor(iCursorColor.b * 255.0 + 0.5));
+    float cornerRadius = (effectFlags != 0 ? res.y * GLASS_CORNER_RADIUS : 0.0);
     vec2 cornerOffset = abs(bowed) * res * 0.5 - res * 0.5 + cornerRadius;
     float glassEdge = length(max(cornerOffset, vec2(0.0))) + min(max(cornerOffset.x, cornerOffset.y), 0.0) - cornerRadius;
     if (glassEdge > 0.5) {
@@ -127,12 +129,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // iCursorColor is the live terminal color. It also follows a toggle sent while an app such
     // as Claude Code hides the cursor, when iCurrentCursorColor stays frozen.
     bool shellColorSet = any(greaterThan(iCursorColor, vec3(0.0)));
-    if (shellColorSet && iCursorColor.b < 0.05 && iCursorColor.r < 0.05) {
+    // Off is exactly flags 0 with no heat. A small non-zero flag value is still on.
+    if (shellColorSet && effectFlags == 0 && iCursorColor.r < 0.05) {
         vec4 terminal = texture(iChannel0, viewportCoord / res);
         fragColor = terminal;
         return;
     }
-    int effectFlags = int(floor(iCursorColor.b * 255.0 + 0.5));
     bool backgroundRainEnabled = (effectFlags & 1) != 0;
     bool idleAnimationEnabled = (effectFlags & 2) != 0;
     bool shakeEnabled = (effectFlags & 4) != 0;

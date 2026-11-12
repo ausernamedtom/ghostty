@@ -2,7 +2,8 @@
 background = 080a0b
 foreground = dce4e7
 minimum-contrast = 4.5
-cursor-color = 00ff66
+# The shader reads effect flags from the blue channel (0f = all effects on), so it works before the shell sends its first OSC 12.
+cursor-color = 00ff0f
 cursor-text = 021007
 cursor-style = block
 cursor-style-blink = false
@@ -40,7 +41,7 @@ custom-shader = @PROJECT_DIR@/shaders/matrix-power.glsl
 custom-shader-animation = always
 # The wrapper loads integration explicitly, after the real user startup files.
 shell-integration = none
-shell-integration-features = no-cursor,sudo,title
+shell-integration-features = no-cursor,sudo,title,ssh-terminfo,ssh-env
 command = @PROJECT_DIR@/launch-shell
 keybind = super+shift+p=csi:99~
 keybind = super+shift+b=csi:98~
