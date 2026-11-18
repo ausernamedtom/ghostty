@@ -8,9 +8,30 @@ const float SHAKE_PIXELS = 1.0;
 // Welding-torch heat for contact flash and sparks, even where no shell reports heat.
 const float SPARK_HEAT_FLOOR = 0.85;
 const float GLASS_CURVATURE = 0.03;
+const float GLASS_FRAME_MARGIN = 0.035;
 const float SCANLINE_STRENGTH = 0.20;
 // Edge darkening like a photo lens: 0 is off, 0.3 is slight, 0.6 is heavy.
 const float VIGNETTE_STRENGTH = 0.30;
+// A narrow charcoal rim makes the bowed glass edge read as a CRT bezel.
+const float GLASS_EDGE_WIDTH = 0.028;
+const float GLASS_EDGE_STRENGTH = 0.90;
+const float GLASS_EDGE_REFLECTION = 0.18;
+const vec3 GLASS_EDGE_COLOR = vec3(0.025, 0.029, 0.031);
+const float GLASS_GLARE_STRENGTH = 0.40;
+const float CONTENT_PADDING_CELLS = 0.375;
+// XY points toward the top-left; positive Z places the source slightly behind the viewer.
+const vec3 LIGHT_DIRECTION = vec3(-0.30, 0.40, 0.866);
+const vec2 LIGHT_SOURCE_ORIGIN = vec2(-0.82, 0.82);
+// These profiles are selectable with Cmd+Shift+L and can be tuned independently.
+const float DAYLIGHT_TEMPERATURE_K = 7500.0;
+const float DAYLIGHT_INTENSITY = 0.66;
+const float DAWN_TEMPERATURE_K = 4800.0;
+const float DAWN_INTENSITY = 0.54;
+const float MIDNIGHT_TEMPERATURE_K = 4200.0;
+const float MIDNIGHT_INTENSITY = 0.40;
+const vec3 DAYLIGHT_BEZEL_COLOR = vec3(0.53, 0.51, 0.46);
+const vec3 DAWN_BEZEL_COLOR = vec3(0.29, 0.265, 0.235);
+const vec3 MIDNIGHT_BEZEL_COLOR = vec3(0.070, 0.078, 0.095);
 const float IDLE_RAIN_STRENGTH = 0.65;
 const float IDLE_BLUR_PIXELS = 5.0;
 // The idle look builds up slowly after focus is lost and releases quickly when focus returns.
@@ -25,14 +46,46 @@ const float RAIN_GLOW_STRENGTH = 0.50;
 // Higher values thin the glyph strokes: 0 keeps the full bitmap weight, 0.9 leaves only the cores.
 const float RAIN_STROKE_THINNING = 0.60;
 // Slightly rounded glass corners, as a fraction of the glass height.
-const float GLASS_CORNER_RADIUS = 0.02;
-// Window area outside the glass: the terminal background colour (config), so it reads as one surface.
-const vec3 OUTSIDE_COLOR = vec3(0.031, 0.039, 0.043);
+const float GLASS_CORNER_RADIUS = 0.01;
 float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+float valueNoise(vec2 p) {
+    vec2 cell = floor(p);
+    vec2 blend = fract(p);
+    blend = blend * blend * (3.0 - 2.0 * blend);
+    float a = hash(dot(cell, vec2(127.1, 311.7)));
+    float b = hash(dot(cell + vec2(1.0, 0.0), vec2(127.1, 311.7)));
+    float c = hash(dot(cell + vec2(0.0, 1.0), vec2(127.1, 311.7)));
+    float d = hash(dot(cell + vec2(1.0, 1.0), vec2(127.1, 311.7)));
+    return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
+}
 float segmentDistance(vec2 p, vec2 a, vec2 b) {
     vec2 edge = b - a;
     float along = clamp(dot(p - a, edge) / max(dot(edge, edge), 0.001), 0.0, 1.0);
     return length(p - a - edge * along);
+}
+float glassDistance(vec2 screen, vec2 res, float cornerRadius, float frameMargin) {
+    vec2 bowed = screen * (1.0 + GLASS_CURVATURE * screen.yx * screen.yx);
+    vec2 cornerOffset = abs(bowed) * res * 0.5 - res * 0.5
+        + cornerRadius + frameMargin;
+    return length(max(cornerOffset, vec2(0.0)))
+        + min(max(cornerOffset.x, cornerOffset.y), 0.0) - cornerRadius;
+}
+vec3 colorTemperature(float kelvin) {
+    float temperature = clamp(kelvin, 1000.0, 40000.0) / 100.0;
+    float red;
+    float green;
+    float blue;
+    if (temperature <= 66.0) {
+        red = 1.0;
+        green = clamp(0.39008158 * log(temperature) - 0.63184144, 0.0, 1.0);
+        blue = temperature <= 19.0 ? 0.0
+            : clamp(0.54320679 * log(temperature - 10.0) - 1.19625409, 0.0, 1.0);
+    } else {
+        red = clamp(1.2929362 * pow(temperature - 60.0, -0.13320476), 0.0, 1.0);
+        green = clamp(1.1298909 * pow(temperature - 60.0, -0.07551485), 0.0, 1.0);
+        blue = 1.0;
+    }
+    return vec3(red, green, blue);
 }
 // Real mirrored half-width katakana and digits, rasterized with CoreText.
 const uint MATRIX_GLYPHS[605] = uint[605](
@@ -110,35 +163,107 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 viewportCoord = fragCoord;
     // The bowed glass: the outline uses the same warp as the content, so the edges bulge with it.
     vec2 screen = viewportCoord / res * 2.0 - 1.0;
-    vec2 bowed = screen * (1.0 + GLASS_CURVATURE * screen.yx * screen.yx);
     // Rounded rectangle distance in the bowed space: negative inside the glass, positive outside.
     // The cursor blue channel carries the effect flags; zero means Matrix Power is off.
     int effectFlags = int(floor(iCursorColor.b * 255.0 + 0.5));
-    float cornerRadius = (effectFlags != 0 ? res.y * GLASS_CORNER_RADIUS : 0.0);
-    vec2 cornerOffset = abs(bowed) * res * 0.5 - res * 0.5 + cornerRadius;
-    float glassEdge = length(max(cornerOffset, vec2(0.0))) + min(max(cornerOffset.x, cornerOffset.y), 0.0) - cornerRadius;
-    if (glassEdge > 0.5) {
-        fragColor = vec4(OUTSIDE_COLOR, 1.0);
+    // Bypass the entire shader when disabled. In particular, do not let the bowed
+    // coordinates or glass edge treatment keep a bezel visible after power-off.
+    bool shellColorSet = any(greaterThan(iCursorColor, vec3(0.0)));
+    if (shellColorSet && effectFlags == 0 && iCursorColor.r < 0.05) {
+        fragColor = texture(iChannel0, viewportCoord / res);
+        return;
+    }
+    bool bezelEnabled = (effectFlags & 128) != 0;
+    float cornerRadius = (bezelEnabled && effectFlags != 0 ? res.y * GLASS_CORNER_RADIUS : 0.0);
+    float frameMargin = (bezelEnabled && effectFlags != 0 ? res.y * GLASS_FRAME_MARGIN : 0.0);
+    int lightMode = (effectFlags >> 5) & 3;
+    float lightTemperature = DAYLIGHT_TEMPERATURE_K;
+    float lightIntensity = DAYLIGHT_INTENSITY;
+    vec3 bezelColor = DAYLIGHT_BEZEL_COLOR;
+    if (lightMode == 1) {
+        lightTemperature = DAWN_TEMPERATURE_K;
+        lightIntensity = DAWN_INTENSITY;
+        bezelColor = DAWN_BEZEL_COLOR;
+    } else if (lightMode == 2) {
+        lightTemperature = MIDNIGHT_TEMPERATURE_K;
+        lightIntensity = MIDNIGHT_INTENSITY;
+        bezelColor = MIDNIGHT_BEZEL_COLOR;
+    }
+    vec3 lightColor = colorTemperature(lightTemperature);
+    lightIntensity = clamp(lightIntensity, 0.0, 1.5);
+    // Shared casing color keeps the feathered glass boundary continuous with the outer bezel.
+    float grainFine = valueNoise(viewportCoord * 0.72) - 0.5;
+    float grainSoft = valueNoise(viewportCoord * 0.18 + 47.0) - 0.5;
+    vec3 bezelSurface = bezelColor * (1.0 + grainFine * 0.035 + grainSoft * 0.012);
+    float roomGlow = exp(-length((screen - LIGHT_SOURCE_ORIGIN) * vec2(1.5, 0.85)) * 2.2);
+    bezelSurface += lightColor * roomGlow * 0.075 * lightIntensity;
+    vec2 bowed = screen * (1.0 + GLASS_CURVATURE * screen.yx * screen.yx);
+    float glassEdge = bezelEnabled
+        ? glassDistance(screen, res, cornerRadius, frameMargin) : -100.0;
+    if (bezelEnabled && glassEdge > 0.5) {
+        vec2 pixelStep = 2.0 / res;
+        vec2 edgeNormal = normalize(vec2(
+            glassDistance(screen + vec2(pixelStep.x, 0.0), res, cornerRadius, frameMargin) - glassEdge,
+            glassDistance(screen + vec2(0.0, pixelStep.y), res, cornerRadius, frameMargin) - glassEdge));
+        float groove = 1.0 - smoothstep(16.8, 18.0, glassEdge);
+        // Narrower chamfer with shaped inner and outer lips for a deeper molded edge.
+        float bevel = smoothstep(18.0, 18.8, glassEdge)
+            * (1.0 - smoothstep(35.2, 36.0, glassEdge));
+        float bevelLight = dot(edgeNormal, normalize(LIGHT_DIRECTION.xy));
+        vec3 outside = bezelSurface;
+        outside = mix(outside, GLASS_EDGE_COLOR, groove);
+        outside *= 1.0 - bevel * 0.38;
+        outside += lightColor * bevel * max(bevelLight, 0.0) * 0.52 * lightIntensity;
+        outside *= 1.0 - bevel * max(-bevelLight, 0.0) * 0.66 * lightIntensity;
+        float innerLip = exp(-pow((glassEdge - 19.0) / 1.8, 2.0));
+        float outerLip = exp(-pow((glassEdge - 35.0) / 2.2, 2.0));
+        outside += lightColor * innerLip * max(bevelLight, 0.0) * 0.20 * lightIntensity;
+        outside *= 1.0 - outerLip * 0.16;
+        if ((effectFlags & 16) != 0) {
+            vec2 spillUV = clamp(viewportCoord / res - edgeNormal * (5.0 / res),
+                vec2(0.0), vec2(1.0));
+            vec2 blurStep = 11.0 / res;
+            vec3 spillBlur = texture(iChannel0, spillUV).rgb * 4.0;
+            spillBlur += (texture(iChannel0, spillUV + vec2(blurStep.x, 0.0)).rgb
+                + texture(iChannel0, spillUV - vec2(blurStep.x, 0.0)).rgb
+                + texture(iChannel0, spillUV + vec2(0.0, blurStep.y)).rgb
+                + texture(iChannel0, spillUV - vec2(0.0, blurStep.y)).rgb) * 2.0;
+            spillBlur += texture(iChannel0, spillUV + blurStep).rgb
+                + texture(iChannel0, spillUV - blurStep).rgb
+                + texture(iChannel0, spillUV + vec2(blurStep.x, -blurStep.y)).rgb
+                + texture(iChannel0, spillUV + vec2(-blurStep.x, blurStep.y)).rgb;
+            spillBlur /= 16.0;
+            vec3 spill = max(spillBlur - vec3(0.08), vec3(0.0));
+            // Confine color reflection to the chamfer; leave the broad outer face clean.
+            outside += spill * bevel * exp(-max(glassEdge - 0.5, 0.0) / 12.0) * 0.48;
+        }
+        // Spill is blended into the opaque casing as a soft reflection.
+        fragColor = vec4(clamp(outside, 0.0, 1.0), 1.0);
         return;
     }
     vec2 cursorScale = res / outputSize;
     vec4 currentCursor = iCurrentCursor * vec4(cursorScale, cursorScale);
     vec4 previousCursor = iPreviousCursor * vec4(cursorScale, cursorScale);
     float cellScale = max(currentCursor.w, 12.0) / REFERENCE_CELL_HEIGHT;
+    // Express the inset in terminal cells, not viewport percentages, so resizing keeps it stable.
+    vec2 cellPixels = vec2(max(currentCursor.z, 1.0), max(currentCursor.w, 12.0));
+    // Inset the terminal image by the bezel depth so the opaque frame does not
+    // cover character rows and columns at the edge of the original viewport.
+    vec2 contentPadPixels = cellPixels * CONTENT_PADDING_CELLS
+        + (bezelEnabled ? vec2(frameMargin) : vec2(0.0));
+    vec2 contentPad = contentPadPixels / res;
+    vec2 contentScale = 1.0 - 2.0 * contentPad;
+    // glassCoord maps padded output pixels back into terminal-image pixels, so
+    // cursor coordinates and cell sizes stay in their original image space.
     // The shell sets the cursor color with OSC 12: red carries heat, pure green means off.
     // iCursorColor is the live terminal color. It also follows a toggle sent while an app such
     // as Claude Code hides the cursor, when iCurrentCursorColor stays frozen.
-    bool shellColorSet = any(greaterThan(iCursorColor, vec3(0.0)));
     // Off is exactly flags 0 with no heat. A small non-zero flag value is still on.
-    if (shellColorSet && effectFlags == 0 && iCursorColor.r < 0.05) {
-        vec4 terminal = texture(iChannel0, viewportCoord / res);
-        fragColor = terminal;
-        return;
-    }
     bool backgroundRainEnabled = (effectFlags & 1) != 0;
     bool idleAnimationEnabled = (effectFlags & 2) != 0;
     bool shakeEnabled = (effectFlags & 4) != 0;
     bool sparksEnabled = (effectFlags & 8) != 0;
+    bool glassGlareEnabled = (effectFlags & 16) != 0;
     float age = max(0.0, iTime - iTimeCursorChange);
     float heat = clamp(iCursorColor.r, 0.0, 1.0) * exp(-age / 3.5);
     float burst = exp(-age * 7.0);
@@ -160,25 +285,31 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         * SHAKE_PIXELS * cellScale * burst * float(shakeEnabled);
     // Sample a gently bowed screen. Warp every layer into the same glass.
     vec2 glassUV = bowed * 0.5 + 0.5;
-    vec2 glassCoord = glassUV * res + shake;
+    // Place the full terminal image inside the padded glass area. Inverting the
+    // output-to-content inset avoids cropping the first and last character cells.
+    vec2 contentUV = (glassUV - contentPad) / contentScale;
+    vec2 glassCoord = contentUV * res + shake;
     // Columns join the rain one by one, with the same ramp and order as the green streams. Each
     // stream washes away the content along its path, and the holes stay behind as the build-up deepens.
     vec2 rainCell = vec2(22.0, 34.0) * cellScale;
-    float eatenColumn = floor(glassUV.x * res.x / rainCell.x);
+    float eatenColumn = floor(contentUV.x * res.x / rainCell.x);
     float columnSeed = hash(eatenColumn + 1703.0);
     float columnVisible = smoothstep(columnSeed * 0.8, columnSeed * 0.8 + 0.2, rainIdle);
     float streamTail;
     float streamRow = rainStreamHead(eatenColumn, 1703.0, res.y / rainCell.y, 1.0, iTime, streamTail);
-    float passedRows = streamRow - floor(glassUV.y * res.y / rainCell.y);
+    float passedRows = streamRow - floor(contentUV.y * res.y / rainCell.y);
     float wash = step(0.0, passedRows) * exp(-max(passedRows, 0.0) / (streamTail * 1.2));
     float erosion = columnVisible * clamp(idle * 0.6 + rainIdle * wash * 0.7, 0.0, 1.0);
     float fall = erosion * erosion * IDLE_FALL_FRACTION * res.y * (0.3 + hash(eatenColumn + 77.0));
     vec2 uv = clamp((glassCoord - vec2(0.0, fall)) / res, vec2(0.0), vec2(1.0));
-    vec2 eatenBlock = floor((glassUV * res - vec2(0.0, fall)) / (rainCell * 0.5));
+    vec2 eatenBlock = floor((contentUV * res - vec2(0.0, fall)) / (rainCell * 0.5));
     float blockSeed = hash(eatenBlock.x * 91.0 + eatenBlock.y * 37.0 + 5.0);
     float gone = smoothstep(blockSeed, blockSeed + 0.1, erosion * IDLE_ERODE_MAX);
     vec4 base = texture(iChannel0, uv);
     vec3 color = base.rgb;
+    // Carry the selected lighting profile into the glass itself so the change
+    // remains visible even when only a small part of the bezel is on screen.
+    color *= mix(vec3(1.0), lightColor, 0.18 * lightIntensity);
     // Defocus the terminal under the idle overlay, preserving sharp rain above it.
     if (idle > 0.001) {
         vec2 blurStep = vec2(IDLE_BLUR_PIXELS * idle) / res;
@@ -272,7 +403,25 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // to avoid flicker, with just enough darkening to show the phosphor rows.
     float scanline = 0.5 + 0.5 * cos(glassCoord.y / cellScale * 1.5707963);
     color *= 1.0 - SCANLINE_STRENGTH * scanline;
+    float edgeBand = bezelEnabled
+        ? 1.0 - smoothstep(0.0, res.y * GLASS_EDGE_WIDTH, -glassEdge) : 0.0;
     float vignette = 1.0 - VIGNETTE_STRENGTH * pow(clamp(dot(screen, screen) * 0.5, 0.0, 1.0), 1.4);
     color *= vignette;
-    fragColor = vec4(mix(OUTSIDE_COLOR, clamp(color, 0.0, 1.0), 1.0 - smoothstep(-0.5, 0.5, glassEdge)), base.a);
+    vec2 lightOriginUV = LIGHT_SOURCE_ORIGIN * 0.5 + 0.5;
+    vec2 glareDelta = glassUV - lightOriginUV;
+    vec2 glareDirection = normalize(vec2(0.65, -0.52));
+    vec2 glareNormal = vec2(-glareDirection.y, glareDirection.x);
+    float glareAlong = dot(glareDelta, glareDirection);
+    float glareAcross = dot(glareDelta, glareNormal);
+    float glareStreak = exp(-pow(glareAcross / 0.065, 2.0))
+        * smoothstep(-0.03, 0.12, glareAlong)
+        * (1.0 - smoothstep(0.48, 0.92, glareAlong));
+    float glareBloom = exp(-dot(glareDelta * vec2(1.4, 1.0), glareDelta * vec2(1.4, 1.0)) * 16.0);
+    float glare = (glareStreak * 0.58 + glareBloom * 0.30)
+        * GLASS_GLARE_STRENGTH * lightIntensity * float(glassGlareEnabled);
+    color = mix(color, lightColor, clamp(glare, 0.0, 0.85));
+    vec3 reflectedEdge = mix(GLASS_EDGE_COLOR, color, GLASS_EDGE_REFLECTION);
+    color = mix(color, reflectedEdge, edgeBand * GLASS_EDGE_STRENGTH);
+    // Blend several pixels into the shared casing color to avoid a hard outline at the glass edge.
+    fragColor = vec4(mix(GLASS_EDGE_COLOR, clamp(color, 0.0, 1.0), 1.0 - smoothstep(-5.0, 0.5, glassEdge)), base.a);
 }

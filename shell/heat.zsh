@@ -18,6 +18,12 @@ function _matrix_update_effect_flags() {
   [[ ! -e $state_prefix.idle-off ]] && (( flags |= 2 ))
   [[ ! -e $state_prefix.shake-off ]] && (( flags |= 4 ))
   [[ ! -e $state_prefix.sparks-off ]] && (( flags |= 8 ))
+  [[ ! -e $state_prefix.glass-off ]] && (( flags |= 16 ))
+  [[ ! -e $state_prefix.bezel-off ]] && (( flags |= 128 ))
+  local -i light_mode=2
+  [[ -r $state_prefix.light-mode ]] && read -r light_mode < $state_prefix.light-mode
+  (( light_mode < 0 || light_mode > 2 )) && light_mode=0
+  (( flags |= light_mode << 5 ))
   _matrix_effect_flags=$flags
   return 0
 }
@@ -74,14 +80,35 @@ function _matrix_sparks_toggle() {
   _matrix_reset
   zle -R
 }
+function _matrix_glass_toggle() {
+  "$_matrix_bin/matrix-glass-toggle" $TTY >/dev/null
+  _matrix_reset
+  zle -R
+}
+function _matrix_light_toggle() {
+  "$_matrix_bin/matrix-light-toggle" $TTY >/dev/null
+  _matrix_reset
+  zle -R
+}
+function _matrix_bezel_toggle() {
+  "$_matrix_bin/matrix-bezel-toggle" $TTY >/dev/null
+  _matrix_reset
+  zle -R
+}
 zle -N _matrix_background_toggle
 zle -N _matrix_idle_toggle
 zle -N _matrix_shake_toggle
 zle -N _matrix_sparks_toggle
+zle -N _matrix_glass_toggle
+zle -N _matrix_light_toggle
+zle -N _matrix_bezel_toggle
 bindkey '\e[98~' _matrix_background_toggle
 bindkey '\e[100~' _matrix_idle_toggle
 bindkey '\e[101~' _matrix_shake_toggle
 bindkey '\e[102~' _matrix_sparks_toggle
+bindkey '\e[103~' _matrix_glass_toggle
+bindkey '\e[104~' _matrix_light_toggle
+bindkey '\e[105~' _matrix_bezel_toggle
 add-zle-hook-widget line-pre-redraw _matrix_redraw
 add-zsh-hook preexec _matrix_reset
 add-zsh-hook precmd _matrix_reset

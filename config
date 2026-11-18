@@ -2,8 +2,8 @@
 background = 080a0b
 foreground = dce4e7
 minimum-contrast = 4.5
-# The shader reads effect flags from the blue channel (0f = all effects on), so it works before the shell sends its first OSC 12.
-cursor-color = 00ff0f
+# The shader reads effect flags from the blue channel (df = all effects on, midnight lighting), so it works before the shell sends its first OSC 12.
+cursor-color = 00ffdf
 cursor-text = 021007
 cursor-style = block
 cursor-style-blink = false
@@ -48,3 +48,6 @@ keybind = super+shift+b=csi:98~
 keybind = super+shift+i=csi:100~
 keybind = super+shift+s=csi:101~
 keybind = super+shift+k=csi:102~
+keybind = super+shift+g=csi:103~
+keybind = super+shift+o=csi:104~
+keybind = super+shift+v=csi:105~

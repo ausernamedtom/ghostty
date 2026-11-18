@@ -20,7 +20,7 @@ state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/matrix-power
 state_prefix=$state_dir/${tty_device:t}
 mkdir -p "$state_dir"
 case $mode in
-  power|background|idle|shake|sparks)
+  power|background|idle|shake|sparks|glass|bezel)
     state="$state_prefix.$mode-off"
     if [[ -e $state ]]; then
       rm -f -- "$state"
@@ -30,8 +30,19 @@ case $mode in
       effect_status=off
     fi
     ;;
+  light)
+    light_mode=2
+    [[ -r "$state_prefix.light-mode" ]] && read -r light_mode < "$state_prefix.light-mode"
+    (( light_mode = (light_mode + 1) % 3 ))
+    print -r -- "$light_mode" > "$state_prefix.light-mode"
+    case $light_mode in
+      0) effect_status='daylight';;
+      1) effect_status='dawn/dusk';;
+      2) effect_status='midnight';;
+    esac
+    ;;
   color) ;;
-  *) print -u2 'matrix-effect: expected power, background, idle, shake, sparks, or color'; exit 2 ;;
+  *) print -u2 'matrix-effect: expected power, background, idle, shake, sparks, glass, bezel, light, or color'; exit 2 ;;
 esac
 if [[ -e "$state_prefix.power-off" ]]; then
   color=00ff00
@@ -40,11 +51,18 @@ else
   idle=1
   shake=1
   sparks=1
+  glass=1
+  bezel=1
   [[ -e "$state_prefix.background-off" ]] && background=0
   [[ -e "$state_prefix.idle-off" ]] && idle=0
   [[ -e "$state_prefix.shake-off" ]] && shake=0
   [[ -e "$state_prefix.sparks-off" ]] && sparks=0
-  blue=$(( background + idle * 2 + shake * 4 + sparks * 8 ))
+  [[ -e "$state_prefix.glass-off" ]] && glass=0
+  [[ -e "$state_prefix.bezel-off" ]] && bezel=0
+  light_mode=2
+  [[ -r "$state_prefix.light-mode" ]] && read -r light_mode < "$state_prefix.light-mode"
+  (( light_mode < 0 || light_mode > 2 )) && light_mode=0
+  blue=$(( background + idle * 2 + shake * 4 + sparks * 8 + glass * 16 + light_mode * 32 + bezel * 128 ))
   blue=$(printf '%02x' $blue)
   color=00ff$blue
 fi
